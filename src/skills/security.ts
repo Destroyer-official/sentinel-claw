@@ -13,89 +13,88 @@ export class SecuritySkill extends OpenClawSkill {
     const address = input.contractAddress;
     console.log(chalk.yellow(`🛡️ [TimeLock AI] Analyzing temporal patterns for: ${address}`));
 
+    const apiKey = process.env.BASESCAN_API_KEY;
+    if (!apiKey) {
+      console.log(chalk.red("   ❌ ERROR: Missing BASESCAN_API_KEY in .env"));
+      return { success: false, message: "Missing API Key" };
+    }
+
     try {
-      const apiKey = process.env.BASESCAN_API_KEY;
+      // FIX 1: Use the Etherscan V2 URL (matches your Key type)
+      const url = `https://api.etherscan.io/v2/api?chainid=8453&module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${apiKey}`;
 
-      if (!apiKey) {
-        console.log(chalk.red("   ❌ ERROR: Missing BASESCAN_API_KEY in .env"));
-        return { success: false, message: "Missing API Key" };
-      }
-
-      // 1. Call BaseScan API
-      const url = `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${apiKey}`;
-
-      const response = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0' } // Helps bypass some API blocks
-      });
-
+      const response = await axios.get(url);
       const data = response.data;
 
-      // 2. Handle API Errors
-      if (data.status === "0" && data.message !== "No transactions found") {
-        // "No transactions" is actually safe (it means it's brand new or unused)
-        if (data.message.includes("No transactions")) {
-            return {
-                success: true,
-                message: "Fresh Address",
-                data: { safe: true, reason: "Fresh Address (No History)" }
-            };
-        }
-        console.log(chalk.red(`   ⚠️ BaseScan API Error: ${data.message}`));
-        return { success: false, message: data.message || "Unknown API Error", data: { risk: "UNKNOWN" } };
+      // FIX 2: Handle "No Transactions" (Brand new contract)
+      if (data.status === "0" && data.message === "No transactions found") {
+         return {
+             success: true,
+             message: "Fresh Address", // <--- Added Message
+             data: { safe: false, reason: "Fresh Address (No History)" }
+         };
+      }
+
+      // Handle other API Errors
+      if (data.status === "0") {
+          console.log(chalk.red(`   ⚠️ API Error: ${data.result}`));
+          return {
+              success: false,
+              message: typeof data.result === 'string' ? data.result : "API Error", // <--- Added Message
+              data: { risk: "UNKNOWN" }
+          };
       }
 
       const txs = data.result;
 
-      if (!Array.isArray(txs) || txs.length === 0) {
-        return {
-            success: true,
-            message: "No History",
-            data: { safe: true, reason: "Fresh Address (No History)" }
-        };
+      // Double check array
+      if (!txs || txs.length === 0) {
+          return {
+              success: true,
+              message: "No History", // <--- Added Message
+              data: { safe: false, reason: "No History found" }
+          };
       }
 
-      // 3. The TimeLock Logic
       const deployTx = txs[0];
       const deployTime = parseInt(deployTx.timeStamp);
 
-      // Compare Deployment vs Now (or 2nd Transaction)
-      const now = Math.floor(Date.now() / 1000);
+      // Check 2nd transaction
       const actionTx = txs.length > 1 ? txs[1] : null;
-      const actionTime = actionTx ? parseInt(actionTx.timeStamp) : now;
+      let reason = "Human Speed Verified";
+      let isSafe = true;
 
-      const diffSeconds = actionTime - deployTime;
+      if (actionTx) {
+        const actionTime = parseInt(actionTx.timeStamp);
+        const diffSeconds = actionTime - deployTime;
 
-      console.log(chalk.gray(`   > Deploy Time: ${new Date(deployTime * 1000).toISOString()}`));
-      console.log(chalk.gray(`   > Action Time: ${new Date(actionTime * 1000).toISOString()}`));
-      console.log(chalk.cyan(`   > Speed Delta: ${diffSeconds} seconds`));
+        // 3 Minute Rule
+        if (diffSeconds < 180) {
+          isSafe = false;
+          reason = `🚨 MACHINE SPEED (${diffSeconds}s). Likely Rug.`;
+        }
+      }
 
-      // 4. Judgment
-      if (diffSeconds < 180) { // Less than 3 Minutes
-        const reason = `🚨 MACHINE SPEED DETECTED (${diffSeconds}s). Likely Rug.`;
-        console.log(chalk.red(`   ❌ RISK DETECTED: ${reason}`));
-
-        // FIX: Added 'message' property here
+      // FIX 3: Add 'message' to the final returns
+      if (isSafe) {
+        console.log(chalk.green(`   ✅ SECURITY PASS: ${reason}`));
         return {
             success: true,
-            message: "Risk Detected",
-            data: { safe: false, reason }
+            message: "Security Pass", // <--- Added Message
+            data: { safe: true, reason }
         };
       } else {
-        const reason = "Human Speed Verified";
-        console.log(chalk.green(`   ✅ SECURITY PASS: ${reason}`));
-
-        // FIX: Added 'message' property here
+        console.log(chalk.red(`   ❌ RISK DETECTED: ${reason}`));
         return {
             success: true,
-            message: "Security Verified",
-            data: { safe: true, reason }
+            message: "Risk Detected", // <--- Added Message
+            data: { safe: false, reason }
         };
       }
 
     } catch (error: any) {
-      const msg = error.message || "Unknown API Error";
-      console.error(chalk.red(`   ❌ ERROR:`), msg);
-      return { success: false, message: msg };
+      console.error(chalk.red("   API Connection Failed:"), error.message);
+      return { success: false, message: "API Connection Error" };
     }
   }
 }
