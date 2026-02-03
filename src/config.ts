@@ -5,12 +5,23 @@ import { base } from 'viem/chains';
 
 dotenv.config();
 
-// Safety Check
-if (!process.env.PRIVATE_KEY) {
+// 1. Get the raw key
+const rawKey = process.env.PRIVATE_KEY;
+
+if (!rawKey) {
   throw new Error("❌ PRIVATE_KEY missing in .env file");
 }
 
-const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
+// 2. Fix the format (Add '0x' if missing)
+const formattedKey = rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`;
+
+// 3. Simple Validation (Hex keys are usually 66 chars long including 0x)
+if (formattedKey.length !== 66) {
+    console.warn(`⚠️ Warning: Private Key length is ${formattedKey.length}. Expected 66. Double check your .env file.`);
+}
+
+// 4. Create Account
+const account = privateKeyToAccount(formattedKey as `0x${string}`);
 
 export const walletClient = createWalletClient({
   account,
@@ -20,14 +31,12 @@ export const walletClient = createWalletClient({
 
 export const CONFIG = {
   AGENT_NAME: "SentinelClaw",
-  // The 'Persona' is critical for the LLM
   SYSTEM_PROMPT: `You are SentinelClaw, an autonomous VC agent on Base.
   You value SECURITY above all else.
-  You look for 'Human Speed' deployments and active social histories.
   You REJECT 'Machine Speed' rugs.`,
   THRESHOLDS: {
-    MIN_SCORE: 8, // Out of 10
-    TIMELOCK_MIN_SECONDS: 180 // 3 minutes
+    MIN_SCORE: 8,
+    TIMELOCK_MIN_SECONDS: 180
   }
 };
 

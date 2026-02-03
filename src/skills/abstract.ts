@@ -8,6 +8,6 @@ export abstract class OpenClawSkill {
   abstract name: string;
   abstract description: string;
 
-  // Every skill must have a 'run' function
-  abstract run(input: any): Promise<SkillResponse>;
+  // Update: Explicitly allow 'any' input
+  abstract run(input?: any): Promise<SkillResponse>;
 }
